@@ -62,7 +62,7 @@ export const Mint = () => {
 
   // On mount, see if there are available collab contracts
   useEffect(() => {
-    // On boot, see what addresses the synced address can manage 
+    // On boot, see what addresses the synced address can manage
     fetchGraphQL(getCollabsForAddress, 'GetCollabs', {
       address: acc?.address,
     }).then(({ data, errors }) => {
