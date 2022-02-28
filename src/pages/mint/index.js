@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useState } from 'react'
 import Compressor from 'compressorjs'
 import ipfsHash from 'ipfs-only-hash'
+import _ from 'lodash'
 import { HicetnuncContext } from '../../context/HicetnuncContext'
 import { Page, Container, Padding } from '../../components/layout'
 import { Input, Textarea } from '../../components/input'
@@ -19,6 +20,7 @@ import {
   MAX_EDITIONS,
   MIN_ROYALTIES,
   MAX_ROYALTIES,
+  BURN_ADDRESS
 } from '../../constants'
 import { fetchGraphQL, getCollabsForAddress, getNameForAddress } from '../../data/hicdex'
 import collabStyles from '../../components/collab/styles.module.scss'
@@ -226,7 +228,7 @@ export const Mint = () => {
     }
   }
 
-  const checkDoubleMint = async () => {
+  const isDoubleMint = async () => {
     const rawLeaves = false
     const hashv0 = await ipfsHash.of(file.buffer, { cidVersion:0, rawLeaves })
     const hashv1 = await ipfsHash.of(file.buffer, { cidVersion:1, rawLeaves })
@@ -236,42 +238,35 @@ export const Mint = () => {
     const uri0 = `ipfs://${hashv0}`
     const uri1 = `ipfs://${hashv1}`
     const { errors, data } = await fetchGraphQL(uriQuery, 'uriQuery',  {"ids":[uri0, uri1]})
+
     if (errors) {
       console.error(errors)
-      return true; // assume it's a double mint.
+      return true // assume it's a double mint.
     } else if (data) {
-      const uriMatches = data.hic_et_nunc_token
-      if (uriMatches && uriMatches.length > 0) {
-        let burnCount = 0
-        for (let index = 0; index < uriMatches.length; index++) {
-          const uriMatch = uriMatches[index]
-          if (uriMatch.token_holders && uriMatch.token_holders.length === 1) {
-            if (uriMatch.token_holders[0].holder.address === 'tz1burnburnburnburnburnburnburjAYjjX') {
-              burnCount++
-            }
-          }
-        }
-        if (burnCount !== uriMatches.length) {
-        //throw new Error(`double mint detected: #${uriMatches[0].id} is already minted`)
-        setFeedback({
-          visible: true,
-          message: `Duplicate mint  detected: #${uriMatches[0].id} is already minted`,
-          progress: false,
-          confirm: true,
-          confirmCallback: () => {
-            setFeedback({ visible: false })
-          },
-        })
-        return true;
-        }
+      const areAllTokensBurned = (data.hic_et_nunc_token || []).every((token) => _.get(token, 'token_holders.0.holder.address') === BURN_ADDRESS);
+
+      if (areAllTokensBurned) {
+        return false
       }
+
+      setFeedback({
+        visible: true,
+        message: `Duplicate mint detected: #${data.hic_et_nunc_token[0].id} is already minted`,
+        progress: false,
+        confirm: true,
+        confirmCallback: () => {
+          setFeedback({ visible: false })
+        },
+      })
+
+      return true
     }
+
     return false;
   }
 
   const handlePreview = async () => {
-    const isDoubleMint = await checkDoubleMint()
-    if (!isDoubleMint) {
+    if (!await isDoubleMint()) {
       setStep(1)
     }
   }
