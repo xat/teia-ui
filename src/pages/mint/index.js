@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react'
 import Compressor from 'compressorjs'
+import ipfsHash from 'ipfs-only-hash'
 import { HicetnuncContext } from '../../context/HicetnuncContext'
 import { Page, Container, Padding } from '../../components/layout'
 import { Input, Textarea } from '../../components/input'
@@ -37,6 +38,21 @@ const thumbnailOptions = {
   maxHeight: 350,
 }
 
+const uriQuery = `query uriQuery($ids: [String!] = "") {
+  hic_et_nunc_token(order_by: {id: desc}, where: {artifact_uri: {_in: $ids}}) {
+    id
+    creator {
+      address
+      name
+    }
+    token_holders(where: {quantity: {_gt: "0"}}, order_by: {id: asc}) {
+      holder {
+        address
+      }
+    }
+  }
+}`;
+
 // @crzypathwork change to "true" to activate displayUri and thumbnailUri
 const GENERATE_DISPLAY_AND_THUMBNAIL = true
 
@@ -62,7 +78,7 @@ export const Mint = () => {
 
   // On mount, see if there are available collab contracts
   useEffect(() => {
-    // On boot, see what addresses the synced address can manage 
+    // On boot, see what addresses the synced address can manage
     fetchGraphQL(getCollabsForAddress, 'GetCollabs', {
       address: acc?.address,
     }).then(({ data, errors }) => {
@@ -210,8 +226,54 @@ export const Mint = () => {
     }
   }
 
-  const handlePreview = () => {
-    setStep(1)
+  const checkDoubleMint = async () => {
+    const rawLeaves = false
+    const hashv0 = await ipfsHash.of(file.buffer, { cidVersion:0, rawLeaves })
+    const hashv1 = await ipfsHash.of(file.buffer, { cidVersion:1, rawLeaves })
+    console.log(`Current CIDv0: ${hashv0}`)
+    console.log(`Current CIDv1: ${hashv1}`)
+
+    const uri0 = `ipfs://${hashv0}`
+    const uri1 = `ipfs://${hashv1}`
+    const { errors, data } = await fetchGraphQL(uriQuery, 'uriQuery',  {"ids":[uri0, uri1]})
+    if (errors) {
+      console.error(errors)
+      return true; // assume it's a double mint.
+    } else if (data) {
+      const uriMatches = data.hic_et_nunc_token
+      if (uriMatches && uriMatches.length > 0) {
+        let burnCount = 0
+        for (let index = 0; index < uriMatches.length; index++) {
+          const uriMatch = uriMatches[index]
+          if (uriMatch.token_holders && uriMatch.token_holders.length === 1) {
+            if (uriMatch.token_holders[0].holder.address === 'tz1burnburnburnburnburnburnburjAYjjX') {
+              burnCount++
+            }
+          }
+        }
+        if (burnCount !== uriMatches.length) {
+        //throw new Error(`double mint detected: #${uriMatches[0].id} is already minted`)
+        setFeedback({
+          visible: true,
+          message: `Duplicate mint  detected: #${uriMatches[0].id} is already minted`,
+          progress: false,
+          confirm: true,
+          confirmCallback: () => {
+            setFeedback({ visible: false })
+          },
+        })
+        return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  const handlePreview = async () => {
+    const isDoubleMint = await checkDoubleMint()
+    if (!isDoubleMint) {
+      setStep(1)
+    }
   }
 
   const handleFileUpload = async (props) => {
